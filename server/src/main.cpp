@@ -43,9 +43,9 @@ private:
 
     start_receive([&](auto cmd, auto bufflist) {
       std::string command = cmd;
+      std::cout << command << "/" << bufflist.size() << std::endl;
       if (command != "error" && bufflist.size() > 0)
       {
-        std::string command;
         for (auto& b : bufflist)
         {
           if (command.empty() == false)
@@ -54,6 +54,7 @@ private:
           }
           command += b;
         }
+        std::cout << "CMD: " << command << std::endl;
 
         process::ipstream out_stream;
         process::ipstream err_stream;
