@@ -46,41 +46,49 @@ private:
       std::cout << command << "/" << bufflist.size() << std::endl;
       if (command != "error" && bufflist.size() > 0)
       {
+        std::string command_line;
         for (auto& b : bufflist)
         {
-          if (command.empty() == false)
+          if (command_line.empty() == false)
           {
-            command += " ";
+            command_line += " ";
           }
-          command += b;
+          command_line += b;
         }
-        std::cout << "CMD: " << command << std::endl;
+        std::cout << "CMD: " << command_line << std::endl;
 
-        process::ipstream out_stream;
-        process::ipstream err_stream;
-        process::child    c(command, process::std_out > out_stream,
-                         process::std_err > err_stream);
-
-        Network::BufferList blist;
-        while (out_stream || err_stream)
+        try
         {
-          std::string oline;
-          if (std::getline(out_stream, oline) && !oline.empty())
-            std::cout << oline << std::endl;
-          std::string eline;
-          if (std::getline(err_stream, eline) && !eline.empty())
+          process::ipstream out_stream;
+          process::ipstream err_stream;
+          process::child    c(command_line, process::std_out > out_stream,
+                           process::std_err > err_stream);
+
+          Network::BufferList blist;
+          while (out_stream || err_stream)
           {
-            blist.push_back(eline);
+            std::string oline;
+            if (std::getline(out_stream, oline) && !oline.empty())
+              std::cout << oline << std::endl;
+            std::string eline;
+            if (std::getline(err_stream, eline) && !eline.empty())
+            {
+              blist.push_back(eline);
+            }
           }
+
+          c.wait();
+
+          if (blist.empty())
+          {
+            blist.push_back("no error");
+          }
+          send("finish", blist, [&](bool) {});
         }
-
-        c.wait();
-
-        if (blist.empty())
+        catch (std::exception& e)
         {
-          blist.push_back("no error");
+          send("finish", {e.what()}, [&](bool) {});
         }
-        send("finish", blist, [&](bool) {});
       }
     });
   }
