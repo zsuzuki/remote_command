@@ -95,8 +95,6 @@ private:
     }
     else
     {
-      std::cout << "read_header:" << read_header_.command_ << "/"
-                << read_header_.length_ << std::endl;
       read_buffer_.resize(read_header_.length_);
       boost::asio::async_read(
           socket_, asio::buffer(read_buffer_.data(), read_buffer_.size()),
@@ -114,7 +112,6 @@ private:
     }
     else
     {
-      std::cout << "recv: " << read_buffer_.data() << std::endl;
       int        ofs = 0;
       BufferList ret;
       for (int i = 0; i < read_header_.count_; i++)
