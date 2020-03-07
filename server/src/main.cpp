@@ -43,7 +43,6 @@ private:
 
     start_receive([&](auto cmd, auto bufflist) {
       std::string command = cmd;
-      std::cout << command << "/" << bufflist.size() << std::endl;
       if (command != "error" && bufflist.size() > 0)
       {
         std::string command_line;
@@ -61,15 +60,16 @@ private:
         {
           process::ipstream out_stream;
           process::ipstream err_stream;
-          process::child    c(command_line, process::std_out > out_stream,
-                           process::std_err > err_stream);
+          process::child    c(command_line, process::std_err > err_stream);
+          // process::child    c(command_line, process::std_out > out_stream,
+          //                  process::std_err > err_stream);
 
           Network::BufferList blist;
-          while (out_stream || err_stream)
+          while (/*out_stream || */ err_stream)
           {
-            std::string oline;
-            if (std::getline(out_stream, oline) && !oline.empty())
-              std::cout << oline << std::endl;
+            //   std::string oline;
+            //   if (std::getline(out_stream, oline) && !oline.empty())
+            //     std::cout << oline << std::endl;
             std::string eline;
             if (std::getline(err_stream, eline) && !eline.empty())
             {
