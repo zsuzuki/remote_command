@@ -10,15 +10,30 @@
 namespace asio    = boost::asio;
 namespace process = boost::process;
 using asio::ip::tcp;
+using child_ptr = std::shared_ptr<process::child>;
 
 class Server : public Network::ConnectionBase
 {
-  tcp::acceptor acceptor_;
+  struct Pipe
+  {
+    // process::async_pipe pipe_;
+    process::ipstream stream_;
+    Network::Buffer   buffer_;
+    std::string       title_;
+
+    // Pipe(asio::io_service& ios, std::string n) : pipe_(ios), title_(n)
+    Pipe(std::string n) : title_(n) { buffer_.resize(8192); }
+  };
+
+  tcp::acceptor         acceptor_;
+  child_ptr             child_;
+  std::shared_ptr<Pipe> outpipe_;
+  std::shared_ptr<Pipe> errpipe_;
 
 public:
   Server(asio::io_service& io_service)
       : Network::ConnectionBase(io_service),
-        acceptor_(io_service, tcp::endpoint(tcp::v4(), 32770))
+        acceptor_(io_service, tcp::endpoint(tcp::v4(), 32000))
   {
   }
 
@@ -58,32 +73,18 @@ private:
 
         try
         {
-          process::ipstream out_stream;
-          process::ipstream err_stream;
-          process::child    c(command_line, process::std_err > err_stream);
-          // process::child    c(command_line, process::std_out > out_stream,
-          //                  process::std_err > err_stream);
+          outpipe_ = std::make_shared<Pipe>(/*io_service_,*/ "stdout");
+          errpipe_ = std::make_shared<Pipe>(/*io_service_,*/ "stderr");
+          child_   = std::make_shared<process::child>(
+              command_line,
+              //process::std_out > outpipe_->pipe_,
+              //process::std_err > errpipe_->pipe_
+              process::std_out > outpipe_->stream_,
+              process::std_err > errpipe_->stream_
+            );
 
-          Network::BufferList blist;
-          while (/*out_stream || */ err_stream)
-          {
-            //   std::string oline;
-            //   if (std::getline(out_stream, oline) && !oline.empty())
-            //     std::cout << oline << std::endl;
-            std::string eline;
-            if (std::getline(err_stream, eline) && !eline.empty())
-            {
-              blist.push_back(eline);
-            }
-          }
-
-          c.wait();
-
-          if (blist.empty())
-          {
-            blist.push_back("no error");
-          }
-          send("finish", blist, [&](bool) {});
+          std::async(std::launch::async, [&]() { pipe_read(outpipe_, true); });
+          std::async(std::launch::async, [&]() { pipe_read(errpipe_, false); });
         }
         catch (std::exception& e)
         {
@@ -91,6 +92,25 @@ private:
         }
       }
     });
+  }
+  void pipe_read(std::shared_ptr<Pipe> pipe, bool send_finish)
+  {
+    // asio::async_read(pipe->pipe_,asio::buffer(pipe->buffer_),
+    //[](const boost::system::error_code &ec, std::size_t size){});
+    std::string l;
+    while (pipe->stream_ && std::getline(pipe->stream_, l))
+    {
+      if (!l.empty())
+      {
+        std::cout << pipe->title_ << ": " << l << std::endl;
+        send(pipe->title_.c_str(), {l}, [&](bool){});
+      }
+    }
+    child_->wait();
+    if (send_finish)
+    {
+      send("finish", {"no error"}, [&](bool){});
+    }
   }
 };
 

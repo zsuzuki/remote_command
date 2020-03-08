@@ -50,7 +50,7 @@ public:
 private:
   void connect()
   {
-    tcp::resolver::query query(server_name_, "32770");
+    tcp::resolver::query query(server_name_, "32000");
     resolver_.async_resolve(query, boost::bind(&Client::on_resolve, this,
                                                asio::placeholders::error,
                                                asio::placeholders::iterator));

@@ -7,6 +7,7 @@
 #include <iostream>
 #include <string>
 #include <vector>
+#include <queue>
 
 namespace Network
 {
@@ -21,16 +22,25 @@ using SendCallback = std::function<void(bool)>;
 using RecvCallback = std::function<void(const char*, const BufferList&)>;
 
 // 送受信ヘッダ
-struct Header
-{
-  size_t length_;
-  size_t count_;
-  char   command_[128];
-};
 
 // 接続
 class ConnectionBase
 {
+  struct Header
+  {
+    size_t length_;
+    size_t count_;
+    char   command_[128];
+  };
+  struct SendInfo
+  {
+    Header       header_;
+    Buffer       body_;
+    SendCallback callback_;
+  };
+  using SendInfoPtr = std::shared_ptr<SendInfo>;
+  using SendQueue = std::queue<SendInfoPtr>;
+
 protected:
   asio::io_service& io_service_;
   tcp::socket       socket_;
@@ -40,6 +50,7 @@ protected:
   Header            write_header_;
   Buffer            write_buffer_;
   SendCallback      write_callback_;
+  SendQueue         send_que_;
 
 public:
   ConnectionBase(asio::io_service& io_service)
@@ -50,28 +61,33 @@ public:
   ///
   void send(const char* cmd, BufferList buff_list, SendCallback cb)
   {
+    auto info = std::make_shared<SendInfo>();
+    auto& header = info->header_;
+    auto& buffer = info->body_;
+    info->callback_ = cb;
+
     int total_size = 0;
     for (auto& b : buff_list)
     {
       total_size += b.size() + 1;
     }
-    write_buffer_.resize(total_size);
+    buffer.resize(total_size);
     int ofs = 0;
     for (auto& b : buff_list)
     {
       int n = b.size() + 1;
-      strncpy(&write_buffer_[ofs], b.c_str(), n);
+      strncpy(&buffer[ofs], b.c_str(), n);
       ofs += n;
     }
-    write_callback_ = cb;
-    strncpy(write_header_.command_, cmd, sizeof(write_header_.command_));
-    write_header_.length_ = write_buffer_.size();
-    write_header_.count_  = buff_list.size();
-    asio::async_write(socket_,
-                      asio::buffer(&write_header_, sizeof(write_header_)),
-                      boost::bind(&ConnectionBase::on_send_header, this,
-                                  asio::placeholders::error,
-                                  asio::placeholders::bytes_transferred));
+    strncpy(header.command_, cmd, sizeof(header.command_));
+    header.length_ = buffer.size();
+    header.count_  = buff_list.size();
+    bool launch = send_que_.empty();
+    send_que_.push(info);
+    if (launch)
+    {
+      io_service_.post([this](){send_loop();});
+    }
   }
 
   ///
@@ -123,7 +139,23 @@ private:
     }
   }
 
-  void on_send_header(const boost::system::error_code& error, size_t bytes)
+  //
+  void send_loop()
+  {
+    if (!send_que_.empty())
+    {
+      auto info = send_que_.front();
+      send_que_.pop();
+
+      auto& header = info->header_;
+      asio::async_write(socket_,
+                        asio::buffer(&header, sizeof(header)),
+                        [this,info](auto& err, auto bytes) {
+                          on_send_header(info, err, bytes);
+                        });
+    }
+  }
+  void on_send_header(SendInfoPtr info, const boost::system::error_code& error, size_t bytes)
   {
     if (error)
     {
@@ -132,23 +164,26 @@ private:
     }
     else
     {
+      auto& buffer = info->body_;
       asio::async_write(
-          socket_, asio::buffer(write_buffer_.data(), write_buffer_.size()),
-          boost::bind(&ConnectionBase::on_send, this, asio::placeholders::error,
-                      asio::placeholders::bytes_transferred));
+          socket_, asio::buffer(buffer),
+          [this,info](auto& err, auto bytes) {
+            on_send(info, err, bytes);
+          });
     }
   }
-  void on_send(const boost::system::error_code& error, size_t bytes)
+  void on_send(SendInfoPtr info, const boost::system::error_code& error, size_t bytes)
   {
     if (error)
     {
       std::cerr << "error[send body]: " << error.message() << std::endl;
-      write_callback_(false);
+      info->callback_(false);
     }
     else
     {
-      write_callback_(true);
+      info->callback_(true);
     }
+    io_service_.post([this](){send_loop();});
   }
 };
 
