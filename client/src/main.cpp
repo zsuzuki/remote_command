@@ -64,8 +64,7 @@ private:
       return;
     }
     asio::async_connect(socket_, endpoint_iterator,
-                        boost::bind(&Client::on_connect, this,
-                                    boost::asio::placeholders::error));
+                        [&](auto& err, auto i) { on_connect(err); });
   }
   //
   void on_connect(const boost::system::error_code& error)
