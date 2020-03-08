@@ -5,9 +5,9 @@
 #include <boost/bind.hpp>
 #include <functional>
 #include <iostream>
+#include <queue>
 #include <string>
 #include <vector>
-#include <queue>
 
 namespace Network
 {
@@ -39,7 +39,7 @@ class ConnectionBase
     SendCallback callback_;
   };
   using SendInfoPtr = std::shared_ptr<SendInfo>;
-  using SendQueue = std::queue<SendInfoPtr>;
+  using SendQueue   = std::queue<SendInfoPtr>;
 
 protected:
   asio::io_service& io_service_;
@@ -61,9 +61,9 @@ public:
   ///
   void send(const char* cmd, BufferList buff_list, SendCallback cb)
   {
-    auto info = std::make_shared<SendInfo>();
-    auto& header = info->header_;
-    auto& buffer = info->body_;
+    auto  info      = std::make_shared<SendInfo>();
+    auto& header    = info->header_;
+    auto& buffer    = info->body_;
     info->callback_ = cb;
 
     int total_size = 0;
@@ -82,11 +82,11 @@ public:
     strncpy(header.command_, cmd, sizeof(header.command_));
     header.length_ = buffer.size();
     header.count_  = buff_list.size();
-    bool launch = send_que_.empty();
+    bool launch    = send_que_.empty();
     send_que_.push(info);
     if (launch)
     {
-      io_service_.post([this](){send_loop();});
+      io_service_.post([this]() { send_loop(); });
     }
   }
 
@@ -94,11 +94,9 @@ public:
   void start_receive(RecvCallback cb)
   {
     read_callback_ = cb;
-    boost::asio::async_read(socket_,
-                            asio::buffer(&read_header_, sizeof(read_header_)),
-                            boost::bind(&ConnectionBase::on_header_receive,
-                                        this, asio::placeholders::error,
-                                        asio::placeholders::bytes_transferred));
+    boost::asio::async_read(
+        socket_, asio::buffer(&read_header_, sizeof(read_header_)),
+        [&](auto& err, auto bytes) { on_header_receive(err, bytes); });
   }
 
 private:
@@ -114,9 +112,7 @@ private:
       read_buffer_.resize(read_header_.length_);
       boost::asio::async_read(
           socket_, asio::buffer(read_buffer_.data(), read_buffer_.size()),
-          boost::bind(&ConnectionBase::on_receive, this,
-                      asio::placeholders::error,
-                      asio::placeholders::bytes_transferred));
+          [&](auto& err, auto bytes) { on_receive(err, bytes); });
     }
   }
   void on_receive(const boost::system::error_code& error, size_t bytes)
@@ -148,14 +144,14 @@ private:
       send_que_.pop();
 
       auto& header = info->header_;
-      asio::async_write(socket_,
-                        asio::buffer(&header, sizeof(header)),
-                        [this,info](auto& err, auto bytes) {
+      asio::async_write(socket_, asio::buffer(&header, sizeof(header)),
+                        [this, info](auto& err, auto bytes) {
                           on_send_header(info, err, bytes);
                         });
     }
   }
-  void on_send_header(SendInfoPtr info, const boost::system::error_code& error, size_t bytes)
+  void on_send_header(SendInfoPtr info, const boost::system::error_code& error,
+                      size_t bytes)
   {
     if (error)
     {
@@ -167,12 +163,11 @@ private:
       auto& buffer = info->body_;
       asio::async_write(
           socket_, asio::buffer(buffer),
-          [this,info](auto& err, auto bytes) {
-            on_send(info, err, bytes);
-          });
+          [this, info](auto& err, auto bytes) { on_send(info, err, bytes); });
     }
   }
-  void on_send(SendInfoPtr info, const boost::system::error_code& error, size_t bytes)
+  void on_send(SendInfoPtr info, const boost::system::error_code& error,
+               size_t bytes)
   {
     if (error)
     {
@@ -183,7 +178,7 @@ private:
     {
       info->callback_(true);
     }
-    io_service_.post([this](){send_loop();});
+    io_service_.post([this]() { send_loop(); });
   }
 };
 

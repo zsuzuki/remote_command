@@ -43,8 +43,7 @@ private:
   // 接続待機
   void start_accept()
   {
-    acceptor_.async_accept(socket_, boost::bind(&Server::on_accept, this,
-                                                asio::placeholders::error));
+    acceptor_.async_accept(socket_, [&](auto& err) { on_accept(err); });
   }
 
   // 接続待機完了
@@ -77,11 +76,10 @@ private:
           errpipe_ = std::make_shared<Pipe>(/*io_service_,*/ "stderr");
           child_   = std::make_shared<process::child>(
               command_line,
-              //process::std_out > outpipe_->pipe_,
-              //process::std_err > errpipe_->pipe_
+              // process::std_out > outpipe_->pipe_,
+              // process::std_err > errpipe_->pipe_
               process::std_out > outpipe_->stream_,
-              process::std_err > errpipe_->stream_
-            );
+              process::std_err > errpipe_->stream_);
 
           std::async(std::launch::async, [&]() { pipe_read(outpipe_, true); });
           std::async(std::launch::async, [&]() { pipe_read(errpipe_, false); });
@@ -103,13 +101,13 @@ private:
       if (!l.empty())
       {
         std::cout << pipe->title_ << ": " << l << std::endl;
-        send(pipe->title_.c_str(), {l}, [&](bool){});
+        send(pipe->title_.c_str(), {l}, [&](bool) {});
       }
     }
     child_->wait();
     if (send_finish)
     {
-      send("finish", {"no error"}, [&](bool){});
+      send("finish", {"no error"}, [&](bool) {});
     }
   }
 };

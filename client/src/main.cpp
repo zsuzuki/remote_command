@@ -51,9 +51,8 @@ private:
   void connect()
   {
     tcp::resolver::query query(server_name_, "32000");
-    resolver_.async_resolve(query, boost::bind(&Client::on_resolve, this,
-                                               asio::placeholders::error,
-                                               asio::placeholders::iterator));
+    resolver_.async_resolve(
+        query, [&](auto& err, auto iter) { on_resolve(err, iter); });
   }
   //
   void on_resolve(const boost::system::error_code& error,
@@ -64,9 +63,9 @@ private:
       std::cout << "resolve failed: " << error.message() << std::endl;
       return;
     }
-    asio::async_connect(
-        socket_, endpoint_iterator,
-        boost::bind(&Client::on_connect, this, asio::placeholders::error));
+    asio::async_connect(socket_, endpoint_iterator,
+                        boost::bind(&Client::on_connect, this,
+                                    boost::asio::placeholders::error));
   }
   //
   void on_connect(const boost::system::error_code& error)
