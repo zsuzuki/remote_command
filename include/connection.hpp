@@ -5,6 +5,7 @@
 #include <boost/bind.hpp>
 #include <functional>
 #include <iostream>
+#include <mutex>
 #include <queue>
 #include <string>
 #include <vector>
@@ -47,10 +48,8 @@ protected:
   Header            read_header_;
   Buffer            read_buffer_;
   RecvCallback      read_callback_;
-  Header            write_header_;
-  Buffer            write_buffer_;
-  SendCallback      write_callback_;
   SendQueue         send_que_;
+  std::mutex        que_lock_;
 
 public:
   ConnectionBase(asio::io_service& io_service)
@@ -82,8 +81,12 @@ public:
     strncpy(header.command_, cmd, sizeof(header.command_));
     header.length_ = buffer.size();
     header.count_  = buff_list.size();
-    bool launch    = send_que_.empty();
-    send_que_.push(info);
+    bool launch;
+    {
+      std::lock_guard<std::mutex> l(que_lock_);
+      launch = send_que_.empty();
+      send_que_.push(info);
+    }
     if (launch)
     {
       io_service_.post([this]() { send_loop(); });
@@ -138,11 +141,17 @@ private:
   //
   void send_loop()
   {
-    if (!send_que_.empty())
+    SendInfoPtr info;
     {
-      auto info = send_que_.front();
-      send_que_.pop();
-
+      std::lock_guard<std::mutex> l(que_lock_);
+      if (!send_que_.empty())
+      {
+        info = send_que_.front();
+        send_que_.pop();
+      }
+    }
+    if (info)
+    {
       auto& header = info->header_;
       asio::async_write(socket_, asio::buffer(&header, sizeof(header)),
                         [this, info](auto& err, auto bytes) {
@@ -156,7 +165,7 @@ private:
     if (error)
     {
       std::cerr << "error[send header]: " << error.message() << std::endl;
-      write_callback_(false);
+      info->callback_(false);
     }
     else
     {
