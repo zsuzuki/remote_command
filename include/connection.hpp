@@ -147,7 +147,6 @@ private:
       if (!send_que_.empty())
       {
         info = send_que_.front();
-        send_que_.pop();
       }
     }
     if (info)
@@ -187,7 +186,14 @@ private:
     {
       info->callback_(true);
     }
-    io_service_.post([this]() { send_loop(); });
+    {
+      std::lock_guard<std::mutex> l(que_lock_);
+      send_que_.pop();
+      if (!send_que_.empty())
+      {
+        io_service_.post([this]() { send_loop(); });
+      }
+    }
   }
 };
 

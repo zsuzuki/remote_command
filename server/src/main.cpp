@@ -11,6 +11,7 @@ namespace asio    = boost::asio;
 namespace process = boost::process;
 using asio::ip::tcp;
 using child_ptr = std::shared_ptr<process::child>;
+using work_ptr  = std::shared_ptr<asio::io_service::work>;
 
 class Server : public Network::ConnectionBase
 {
@@ -29,11 +30,16 @@ class Server : public Network::ConnectionBase
   child_ptr             child_;
   std::shared_ptr<Pipe> outpipe_;
   std::shared_ptr<Pipe> errpipe_;
+  std::future<int>      outfuture_;
+  std::future<int>      errfuture_;
+  std::future<int>      childfuture_;
+  work_ptr              work_;
 
 public:
   Server(asio::io_service& io_service)
       : Network::ConnectionBase(io_service),
-        acceptor_(io_service, tcp::endpoint(tcp::v4(), 32000))
+        acceptor_(io_service, tcp::endpoint(tcp::v4(), 32000)),
+        work_(std::make_shared<asio::io_service::work>(io_service))
   {
   }
 
@@ -81,8 +87,12 @@ private:
               process::std_out > outpipe_->stream_,
               process::std_err > errpipe_->stream_);
 
-          std::async(std::launch::async, [&]() { pipe_read(outpipe_, true); });
-          std::async(std::launch::async, [&]() { pipe_read(errpipe_, false); });
+          outfuture_ = std::async(std::launch::async,
+                                  [&]() { return pipe_read(outpipe_); });
+          errfuture_ = std::async(std::launch::async,
+                                  [&]() { return pipe_read(errpipe_); });
+          childfuture_ =
+              std::async(std::launch::async, [&]() { return child_wait(); });
         }
         catch (std::exception& e)
         {
@@ -91,24 +101,44 @@ private:
       }
     });
   }
-  void pipe_read(std::shared_ptr<Pipe> pipe, bool send_finish)
+  int pipe_read(std::shared_ptr<Pipe> pipe)
   {
     // asio::async_read(pipe->pipe_,asio::buffer(pipe->buffer_),
     //[](const boost::system::error_code &ec, std::size_t size){});
-    std::string l;
+    std::string         l;
+    int                 cnt        = 0;
+    int                 total_size = 0;
+    Network::BufferList bufflist;
     while (pipe->stream_ && std::getline(pipe->stream_, l))
     {
       if (!l.empty())
       {
-        std::cout << pipe->title_ << ": " << l << std::endl;
-        send(pipe->title_.c_str(), {l}, [&](bool) {});
+        // std::cout << pipe->title_ << ": " << l << std::endl;
+        total_size += l.size();
+        bufflist.push_back(l);
+        if (total_size > 500)
+        {
+          send(pipe->title_.c_str(), bufflist, [&](bool) {});
+          bufflist.clear();
+          total_size = 0;
+        }
+        cnt++;
       }
     }
-    child_->wait();
-    if (send_finish)
+    if (!bufflist.empty())
     {
-      send("finish", {"no error"}, [&](bool) {});
+      send(pipe->title_.c_str(), bufflist, [&](bool) {});
     }
+    return cnt;
+  }
+  int child_wait()
+  {
+    child_->wait();
+    outfuture_.get();
+    errfuture_.get();
+    send("finish", {"no error"}, [&](bool) {});
+    work_.reset();
+    return 0;
   }
 };
 
