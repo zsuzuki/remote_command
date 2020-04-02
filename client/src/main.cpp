@@ -1,9 +1,12 @@
 #include <atomic>
+#include <boost/algorithm/string.hpp>
 #include <boost/asio.hpp>
 #include <boost/bind.hpp>
 #include <connection.hpp>
 #include <iostream>
+#include <list>
 #include <memory>
+#include <regex>
 #include <string>
 #include <thread>
 #include <vector>
@@ -11,6 +14,24 @@
 namespace asio = boost::asio;
 using asio::ip::tcp;
 
+//
+class Replace
+{
+public:
+  std::regex  reg;
+  std::string fmt;
+
+  std::string replace(const std::string str) const
+  {
+    const auto flags = std::regex_constants::format_sed;
+    return std::regex_replace(str, reg, fmt, flags);
+  }
+};
+std::vector<Replace> replace_list;
+
+//
+//
+//
 class Client : public Network::ConnectionBase
 {
   using Super = Network::ConnectionBase;
@@ -86,6 +107,10 @@ private:
       {
         for (auto& b : buff)
         {
+          for (const auto& r : replace_list)
+          {
+            b = r.replace(b);
+          }
           std::cout << b << std::endl;
         }
       }
@@ -113,20 +138,61 @@ main(int argc, char** argv)
   asio::io_service io_service;
   Client           client(io_service);
 
-  if (argc <= 2)
-  {
-    std::cerr << argv[0] << ": <hostname> command line..." << std::endl;
-    return 1;
-  }
+  std::string         hostname;
   Network::BufferList buff_list;
-  for (int i = 2; i < argc; i++)
+  int                 start_cmd = 1;
+  for (; start_cmd < argc; start_cmd++)
   {
-    buff_list.push_back(argv[i]);
+    std::string a = argv[start_cmd];
+    if (hostname.empty())
+    {
+      // ホスト名の指定よりも前
+      if (a == "-p")
+      {
+        // 正規表現パターン
+        if (++start_cmd >= argc)
+        {
+          break;
+        }
+        std::string            p = argv[start_cmd];
+        std::string            d{p[0]};
+        std::list<std::string> rl;
+        boost::split(rl, p, boost::is_any_of(d));
+        if (rl.size() < 3)
+        {
+          break;
+        }
+        Replace r;
+        auto    rit = rl.begin();
+        r.reg       = *(++rit);
+        r.fmt       = *(++rit);
+        replace_list.push_back(r);
+      }
+      else
+      {
+        hostname = argv[start_cmd];
+      }
+    }
+    else
+    {
+      //
+      buff_list.push_back(argv[start_cmd]);
+    }
+  }
+
+  if (buff_list.empty())
+  {
+    std::cerr << argv[0]
+              << ": [option] <hostname> command line...\n"
+                 "[option]\n"
+                 "\t-p pattern\treplace the console output by regex\n"
+              << std::endl;
+    return 1;
   }
 
   auto w  = std::make_shared<asio::io_service::work>(io_service);
   auto th = std::thread([&]() { io_service.run(); });
-  client.start(argv[1]);
+  client.start(hostname);
   while (client.isConnect() == false)
   {
     std::this_thread::sleep_for(std::chrono::milliseconds(1));
